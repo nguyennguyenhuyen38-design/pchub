@@ -3,7 +3,7 @@ local RAM_LIMIT_MB = 2500
 local FPS_CAP = 10
 local RAINBOW_ENABLED = true
 local RAINBOW_SPEED = 3.0
-local AUTO_CRASH_ENABLED = true
+local AUTO_CRASH_ENABLED = false
 local DISCORD_INVITE = ".gg/YXdEJruW"
 local LOGO_IMAGE_ID = "rbxassetid://94238207842352"
 
@@ -734,21 +734,9 @@ end
 task.spawn(function()
     task.wait(2) -- Cho script khoi dong xong roi moi load external
     safeLoad("https://raw.githubusercontent.com/canhongson/CanHongSon/refs/heads/main/loader.lua", 15)
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/JustLevel/goombahub/main/goombahub.lua"))()
 end)
 
--- ================= HERMANOS LOADER (da wrapped trong pcall) =================
-getgenv().Hermanos_Settings = {
-    ['key'] = '1bae13a2-6ed4-44a1-85e7-0b39375337ff',
-    ['PC'] = 'CHANGE-ME',
-}
-
-task.spawn(function()
-    local ok, err = pcall(function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/hermanos-dev/hermanos-script/main/sailorpiece-main.lua'))()
-    end)
-    if not ok then
-        warn("[Hermanos Loader] Error: " .. tostring(err))
-    end
-end)
+-- Hermanos Loader da bi xoa bo
 
 notify("ChatGPT Hub", "Black Screen: " .. (blackScreenEnabled and "BAT" or "TAT") .. " | FPS Lock: " .. FPS_CAP, 5)
