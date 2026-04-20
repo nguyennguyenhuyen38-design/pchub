@@ -1,0 +1,754 @@
+-- ================= CONFIG =================
+local RAM_LIMIT_MB = 2500
+local FPS_CAP = 10
+local RAINBOW_ENABLED = true
+local RAINBOW_SPEED = 3.0
+local AUTO_CRASH_ENABLED = true
+local DISCORD_INVITE = ".gg/YXdEJruW"
+local LOGO_IMAGE_ID = "rbxassetid://94238207842352"
+
+-- ================= SERVICES =================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local TweenService = game:GetService("TweenService")
+local ContentProvider = game:GetService("ContentProvider")
+local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+
+-- ================= STATE =================
+local blackScreenEnabled = true
+local autoCrashEnabled = AUTO_CRASH_ENABLED
+
+-- ================= NOTIFICATION =================
+local notifyImpl = nil
+local pendingNotifications = {}
+local function notify(title, text, dur, icon)
+    if notifyImpl then
+        task.spawn(notifyImpl, title, text, dur, icon)
+        return
+    end
+    table.insert(pendingNotifications, {
+        title = title,
+        text = text,
+        dur = dur,
+        icon = icon
+    })
+end
+
+-- ================= AUTO CRASH MONITOR =================
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if autoCrashEnabled then
+            local ok, mem = pcall(function()
+                return Stats:GetTotalMemoryUsageMb()
+            end)
+            if ok and mem >= RAM_LIMIT_MB then
+                notify("RAM LIMIT", string.format("%d/%d MB - Thoat sau 3s", mem, RAM_LIMIT_MB), 5)
+                task.wait(3)
+                game:Shutdown()
+            end
+        end
+    end
+end)
+
+-- ================= FPS CONTROL =================
+task.spawn(function()
+    while true do
+        local ok = pcall(function()
+            if blackScreenEnabled then
+                setfpscap(FPS_CAP)
+            else
+                setfpscap(60)
+            end
+        end)
+        task.wait(1)
+    end
+end)
+
+-- ================= HSV TO RGB (RAINBOW) =================
+local function HSVtoRGB(h, s, v)
+    h = h % 1
+    local i = math.floor(h * 6)
+    local f = h * 6 - i
+    local p = v * (1 - s)
+    local q = v * (1 - f * s)
+    local t = v * (1 - (1 - f) * s)
+    i = i % 6
+    local r, g, b
+    if i == 0 then r, g, b = v, t, p
+    elseif i == 1 then r, g, b = q, v, p
+    elseif i == 2 then r, g, b = p, v, t
+    elseif i == 3 then r, g, b = p, q, v
+    elseif i == 4 then r, g, b = t, p, v
+    else r, g, b = v, p, q end
+    return Color3.new(r, g, b)
+end
+
+-- ================= UI CONSTRUCTION =================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BlackScreenOverlay"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 999999
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local NotificationRoot = Instance.new("Frame")
+NotificationRoot.Name = "NotifyRoot"
+NotificationRoot.Size = UDim2.new(0, 360, 1, -24)
+NotificationRoot.Position = UDim2.new(1, -16, 0, 12)
+NotificationRoot.AnchorPoint = Vector2.new(1, 0)
+NotificationRoot.BackgroundTransparency = 1
+NotificationRoot.BorderSizePixel = 0
+NotificationRoot.ZIndex = 200
+NotificationRoot.Parent = ScreenGui
+
+local notificationLayout = Instance.new("UIListLayout")
+notificationLayout.FillDirection = Enum.FillDirection.Vertical
+notificationLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+notificationLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+notificationLayout.Padding = UDim.new(0, 10)
+notificationLayout.Parent = NotificationRoot
+
+local notifyPrimary = Color3.fromHex("00ff66")
+local notifyDark = Color3.fromRGB(8, 20, 12)
+
+notifyImpl = function(title, text, dur, icon)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 62)
+    card.BackgroundColor3 = notifyDark
+    card.BackgroundTransparency = 0.12
+    card.BorderSizePixel = 0
+    card.ClipsDescendants = true
+    card.ZIndex = 201
+    card.Parent = NotificationRoot
+
+    local cardCorner = Instance.new("UICorner")
+    cardCorner.CornerRadius = UDim.new(0, 16)
+    cardCorner.Parent = card
+
+    local cardStroke = Instance.new("UIStroke")
+    cardStroke.Color = notifyPrimary
+    cardStroke.Thickness = 1.6
+    cardStroke.Transparency = 0.28
+    cardStroke.Parent = card
+
+    local cardGradient = Instance.new("UIGradient")
+    cardGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(14, 38, 26)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 16, 11))
+    })
+    cardGradient.Rotation = 8
+    cardGradient.Parent = card
+
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(0, 5, 1, 0)
+    accent.BackgroundColor3 = notifyPrimary
+    accent.BorderSizePixel = 0
+    accent.ZIndex = 202
+    accent.Parent = card
+
+    local accentFade = Instance.new("UIGradient")
+    accentFade.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, notifyPrimary),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 120, 75))
+    })
+    accentFade.Rotation = 90
+    accentFade.Parent = accent
+
+    local progressTrack = Instance.new("Frame")
+    progressTrack.Size = UDim2.new(1, 0, 0, 3)
+    progressTrack.Position = UDim2.new(0, 0, 1, -3)
+    progressTrack.BackgroundColor3 = Color3.fromRGB(10, 32, 21)
+    progressTrack.BorderSizePixel = 0
+    progressTrack.ZIndex = 202
+    progressTrack.Parent = card
+
+    local progressFill = Instance.new("Frame")
+    progressFill.Size = UDim2.new(1, 0, 1, 0)
+    progressFill.BackgroundColor3 = notifyPrimary
+    progressFill.BorderSizePixel = 0
+    progressFill.ZIndex = 203
+    progressFill.Parent = progressTrack
+
+    local progressGradient = Instance.new("UIGradient")
+    progressGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 255, 165)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 180, 90))
+    })
+    progressGradient.Parent = progressFill
+
+    local iconImage = Instance.new("ImageLabel")
+    iconImage.Size = UDim2.new(0, 40, 0, 40)
+    iconImage.Position = UDim2.new(0, 12, 0.5, 0)
+    iconImage.AnchorPoint = Vector2.new(0, 0.5)
+    iconImage.BackgroundTransparency = 0.1
+    iconImage.BackgroundColor3 = Color3.fromRGB(12, 32, 22)
+    iconImage.Image = icon or LOGO_IMAGE_ID
+    iconImage.ScaleType = Enum.ScaleType.Crop
+    iconImage.ZIndex = 203
+    iconImage.Parent = card
+
+    local iconMask = Instance.new("UICorner")
+    iconMask.CornerRadius = UDim.new(0, 12)
+    iconMask.Parent = iconImage
+
+    local titleLabelN = Instance.new("TextLabel")
+    titleLabelN.Size = UDim2.new(1, -66, 0, 24)
+    titleLabelN.Position = UDim2.new(0, 60, 0, 6)
+    titleLabelN.BackgroundTransparency = 1
+    titleLabelN.Text = title or "Thong bao"
+    titleLabelN.TextColor3 = notifyPrimary
+    titleLabelN.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Bold)
+    titleLabelN.TextSize = 18
+    titleLabelN.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabelN.ZIndex = 203
+    titleLabelN.Parent = card
+
+    local textLabelN = Instance.new("TextLabel")
+    textLabelN.Size = UDim2.new(1, -66, 0, 24)
+    textLabelN.Position = UDim2.new(0, 60, 0, 31)
+    textLabelN.BackgroundTransparency = 1
+    textLabelN.Text = text or ""
+    textLabelN.TextColor3 = Color3.new(1, 1, 1)
+    textLabelN.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Regular)
+    textLabelN.TextSize = 14
+    textLabelN.TextWrapped = false
+    textLabelN.TextXAlignment = Enum.TextXAlignment.Left
+    textLabelN.TextYAlignment = Enum.TextYAlignment.Center
+    textLabelN.ZIndex = 203
+    textLabelN.Parent = card
+
+    local hold = dur or 2.5
+    local scale = Instance.new("UIScale")
+    scale.Scale = 0.92
+    scale.Parent = card
+
+    card.Position = UDim2.new(1, 52, 0, 0)
+    card.BackgroundTransparency = 1
+    iconImage.ImageTransparency = 1
+    titleLabelN.TextTransparency = 1
+    textLabelN.TextTransparency = 1
+    cardStroke.Transparency = 1
+    accent.BackgroundTransparency = 1
+    progressTrack.BackgroundTransparency = 1
+    progressFill.BackgroundTransparency = 1
+
+    TweenService:Create(card, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 0.12}):Play()
+    TweenService:Create(scale, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+    TweenService:Create(iconImage, TweenInfo.new(0.24), {ImageTransparency = 0}):Play()
+    TweenService:Create(titleLabelN, TweenInfo.new(0.24), {TextTransparency = 0}):Play()
+    TweenService:Create(textLabelN, TweenInfo.new(0.24), {TextTransparency = 0}):Play()
+    TweenService:Create(cardStroke, TweenInfo.new(0.24), {Transparency = 0.28}):Play()
+    TweenService:Create(accent, TweenInfo.new(0.24), {BackgroundTransparency = 0}):Play()
+    TweenService:Create(progressTrack, TweenInfo.new(0.24), {BackgroundTransparency = 0}):Play()
+    TweenService:Create(progressFill, TweenInfo.new(0.24), {BackgroundTransparency = 0}):Play()
+    TweenService:Create(progressFill, TweenInfo.new(hold, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {Size = UDim2.new(0, 0, 1, 0)}):Play()
+    TweenService:Create(cardStroke, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.5}):Play()
+
+    task.delay(hold + 0.3, function()
+        if not card.Parent then return end
+        TweenService:Create(card, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(1, 42, 0, 0), BackgroundTransparency = 1}):Play()
+        TweenService:Create(scale, TweenInfo.new(0.24, Enum.EasingStyle.Sine, Enum.EasingDirection.In), {Scale = 0.94}):Play()
+        TweenService:Create(iconImage, TweenInfo.new(0.2), {ImageTransparency = 1}):Play()
+        TweenService:Create(titleLabelN, TweenInfo.new(0.2), {TextTransparency = 1}):Play()
+        TweenService:Create(textLabelN, TweenInfo.new(0.2), {TextTransparency = 1}):Play()
+        TweenService:Create(cardStroke, TweenInfo.new(0.2), {Transparency = 1}):Play()
+        TweenService:Create(accent, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
+        TweenService:Create(progressTrack, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
+        TweenService:Create(progressFill, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
+        task.wait(0.26)
+        card:Destroy()
+    end)
+end
+
+if #pendingNotifications > 0 then
+    for _, n in ipairs(pendingNotifications) do
+        task.spawn(notifyImpl, n.title, n.text, n.dur, n.icon)
+    end
+    pendingNotifications = {}
+end
+
+-- Nen den toan man hinh
+local Background = Instance.new("Frame")
+Background.Size = UDim2.new(1, 0, 1, 0)
+Background.BackgroundColor3 = Color3.new(0, 0, 0)
+Background.BorderSizePixel = 0
+Background.BackgroundTransparency = 0
+Background.Visible = blackScreenEnabled
+Background.ZIndex = 1
+Background.Parent = ScreenGui
+
+-- Thanh trang thai
+local InfoContainer = Instance.new("ScrollingFrame")
+InfoContainer.Size = UDim2.new(1, -20, 0, 48)
+InfoContainer.Position = UDim2.new(0.5, 0, 0, 4)
+InfoContainer.AnchorPoint = Vector2.new(0.5, 0)
+InfoContainer.BackgroundTransparency = 1
+InfoContainer.BorderSizePixel = 0
+InfoContainer.ScrollBarThickness = 0
+InfoContainer.ScrollingDirection = Enum.ScrollingDirection.X
+InfoContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+InfoContainer.AutomaticCanvasSize = Enum.AutomaticSize.X
+InfoContainer.ClipsDescendants = false
+InfoContainer.ZIndex = 10
+InfoContainer.Parent = ScreenGui
+
+local InfoBar = Instance.new("Frame")
+InfoBar.Size = UDim2.new(0, 0, 1, 0)
+InfoBar.BackgroundTransparency = 1
+InfoBar.BorderSizePixel = 0
+InfoBar.AutomaticSize = Enum.AutomaticSize.X
+InfoBar.AnchorPoint = Vector2.new(0.5, 0)
+InfoBar.Position = UDim2.new(0.5, 0, 0, 0)
+InfoBar.Parent = InfoContainer
+
+local layout = Instance.new("UIListLayout", InfoBar)
+layout.FillDirection = Enum.FillDirection.Horizontal
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+layout.VerticalAlignment = Enum.VerticalAlignment.Center
+layout.Padding = UDim.new(0, 6)
+layout.Wraps = false
+
+local function createStatusLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Bold)
+    lbl.TextSize = 22
+    lbl.Size = UDim2.new(0, 0, 1, -4)
+    lbl.AutomaticSize = Enum.AutomaticSize.X
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = InfoBar
+    return lbl
+end
+
+local crashPrefix = createStatusLabel("Auto Crash:")
+local crashIcon = createStatusLabel("")
+crashIcon.RichText = true
+local paren1 = createStatusLabel("(")
+local ramLabel = createStatusLabel("")
+local paren2 = createStatusLabel("MB)")
+local sep2 = createStatusLabel("|")
+local fpsPrefix = createStatusLabel("FPS:")
+local fpsValue = createStatusLabel("0")
+local sep3 = createStatusLabel("|")
+local pingPrefix = createStatusLabel("Ping:")
+local pingValue = createStatusLabel("0")
+
+local statusLabels = { crashPrefix, paren1, paren2, sep2, fpsPrefix, sep3, pingPrefix }
+
+-- Noi dung chinh giua man hinh
+local CenterFrame = Instance.new("Frame")
+CenterFrame.Size = UDim2.new(0, 500, 0, 220)
+CenterFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+CenterFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+CenterFrame.BackgroundTransparency = 1
+CenterFrame.ZIndex = 10
+CenterFrame.Visible = blackScreenEnabled
+CenterFrame.Parent = ScreenGui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 70)
+titleLabel.Position = UDim2.new(0, 0, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "ChatGPT Hub"
+titleLabel.TextColor3 = Color3.fromHex("035b00")
+titleLabel.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Bold)
+titleLabel.TextScaled = true
+titleLabel.ZIndex = 10
+titleLabel.Parent = CenterFrame
+
+local stroke = Instance.new("UIStroke", titleLabel)
+stroke.Color = Color3.fromHex("00ff00")
+stroke.Thickness = 3
+stroke.LineJoinMode = Enum.LineJoinMode.Round
+stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+
+local accountLabel = Instance.new("TextLabel")
+accountLabel.Size = UDim2.new(1, 0, 0, 40)
+accountLabel.Position = UDim2.new(0, 0, 0, 80)
+accountLabel.BackgroundTransparency = 1
+accountLabel.Text = "Account: " .. LocalPlayer.Name
+accountLabel.TextColor3 = Color3.new(1, 1, 1)
+accountLabel.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Regular)
+accountLabel.TextSize = 26
+accountLabel.ZIndex = 10
+accountLabel.Parent = CenterFrame
+
+local discordLabel = Instance.new("TextButton")
+discordLabel.Size = UDim2.new(1, 0, 0, 40)
+discordLabel.Position = UDim2.new(0, 0, 0, 130)
+discordLabel.BackgroundTransparency = 1
+discordLabel.Text = "Join Discord: " .. DISCORD_INVITE
+discordLabel.TextColor3 = Color3.new(1, 1, 1)
+discordLabel.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Regular)
+discordLabel.TextSize = 26
+discordLabel.ZIndex = 10
+discordLabel.Parent = CenterFrame
+
+discordLabel.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(DISCORD_INVITE) end)
+    notify("Discord", "Da copy link: " .. DISCORD_INVITE, 2, LOGO_IMAGE_ID)
+end)
+
+local centerTextObjects = {titleLabel, accountLabel, discordLabel}
+local function tweenCenterContent(alpha, duration)
+    for _, obj in ipairs(centerTextObjects) do
+        TweenService:Create(
+            obj,
+            TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+            {TextTransparency = alpha}
+        ):Play()
+    end
+    TweenService:Create(
+        stroke,
+        TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+        {Transparency = alpha}
+    ):Play()
+end
+
+-- Logo nut goc tron mo GUI
+local LogoButton = Instance.new("ImageButton")
+LogoButton.Size = UDim2.new(0, 74, 0, 74)
+LogoButton.AnchorPoint = Vector2.new(0.5, 0.5)
+LogoButton.Position = UDim2.new(0.92, 0, 0.82, 0)
+LogoButton.BackgroundTransparency = 0.25
+LogoButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+LogoButton.Image = LOGO_IMAGE_ID
+LogoButton.ImageColor3 = Color3.new(1,1,1)
+LogoButton.ScaleType = Enum.ScaleType.Fit
+LogoButton.Active = true
+LogoButton.Draggable = true
+LogoButton.ZIndex = 16
+LogoButton.Visible = true
+LogoButton.Parent = ScreenGui
+
+local logoCorner = Instance.new("UICorner")
+logoCorner.CornerRadius = UDim.new(0, 20)
+logoCorner.Parent = LogoButton
+
+local logoStroke = Instance.new("UIStroke")
+logoStroke.Thickness = 2
+logoStroke.Color = Color3.fromRGB(0, 255, 120)
+logoStroke.Transparency = 0.15
+logoStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+logoStroke.Parent = LogoButton
+
+local logoFallbackText = Instance.new("TextLabel")
+logoFallbackText.Size = UDim2.new(1, -10, 1, -10)
+logoFallbackText.Position = UDim2.new(0.5, 0, 0.5, 0)
+logoFallbackText.AnchorPoint = Vector2.new(0.5, 0.5)
+logoFallbackText.BackgroundTransparency = 1
+logoFallbackText.Text = "GUI"
+logoFallbackText.TextColor3 = Color3.fromRGB(0, 255, 120)
+logoFallbackText.FontFace = Font.fromName("FredokaOne", Enum.FontWeight.Bold)
+logoFallbackText.TextScaled = true
+logoFallbackText.ZIndex = 17
+logoFallbackText.Visible = false
+logoFallbackText.Parent = LogoButton
+
+-- Keo tha thu cong
+local dragging = false
+local dragStart
+local startPos
+local draggedFar = false
+
+LogoButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        draggedFar = false
+        dragStart = input.Position
+        startPos = LogoButton.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+local UserInputService = game:GetService("UserInputService")
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
+    local delta = input.Position - dragStart
+    if delta.Magnitude > 6 then
+        draggedFar = true
+    end
+    LogoButton.Position = UDim2.new(
+        startPos.X.Scale, startPos.X.Offset + delta.X,
+        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+    )
+end)
+
+-- Animation logo lang lu
+LogoButton.Rotation = -5
+local logoHoverTween = TweenService:Create(
+    LogoButton,
+    TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+    {Rotation = 5}
+)
+logoHoverTween:Play()
+
+-- Logo preload async nhung khong block
+task.spawn(function()
+    local ok = pcall(function()
+        ContentProvider:PreloadAsync({LogoButton})
+    end)
+    task.wait(2.5)
+    if not ok or not LogoButton.IsLoaded then
+        LogoButton.ImageTransparency = 1
+        logoFallbackText.Visible = true
+        notify("Logo", "Logo anh tai cham/loi, da bat nut fallback GUI.", 4)
+
+        task.spawn(function()
+            for _ = 1, 8 do
+                task.wait(1)
+                if LogoButton.IsLoaded then
+                    logoFallbackText.Visible = false
+                    LogoButton.ImageTransparency = 0
+                    return
+                end
+            end
+        end)
+    end
+end)
+
+-- Simple particle transition (giam so luong tu 64 xuong 24)
+local ParticleLayer = Instance.new("Frame")
+ParticleLayer.Size = UDim2.new(1, 0, 1, 0)
+ParticleLayer.BackgroundTransparency = 1
+ParticleLayer.BorderSizePixel = 0
+ParticleLayer.ZIndex = 14
+ParticleLayer.Parent = ScreenGui
+
+local activeParticles = 0
+local MAX_PARTICLES = 30
+
+local function createParticle(position, color)
+    if activeParticles >= MAX_PARTICLES then return end
+    activeParticles = activeParticles + 1
+
+    local p = Instance.new("Frame")
+    p.Size = UDim2.new(0, math.random(4, 10), 0, math.random(4, 10))
+    p.AnchorPoint = Vector2.new(0.5, 0.5)
+    p.Position = position
+    p.BackgroundColor3 = color
+    p.BorderSizePixel = 0
+    p.ZIndex = 15
+    p.Parent = ParticleLayer
+
+    local pc = Instance.new("UICorner")
+    pc.CornerRadius = UDim.new(1, 0)
+    pc.Parent = p
+    return p
+end
+
+local function destroyParticle(p)
+    if p and p.Parent then
+        p:Destroy()
+    end
+    activeParticles = math.max(0, activeParticles - 1)
+end
+
+local transitionBusy = false
+local function toggleBlackScreen()
+    if transitionBusy then return end
+    transitionBusy = true
+
+    blackScreenEnabled = not blackScreenEnabled
+    Background.Visible = blackScreenEnabled
+
+    local centerPos = UDim2.new(0.5, 0, 0.5, 0)
+    local logoPos = LogoButton.Position
+
+    if blackScreenEnabled then
+        CenterFrame.Visible = true
+        for _, obj in ipairs(centerTextObjects) do
+            obj.TextTransparency = 1
+        end
+        stroke.Transparency = 1
+
+        for i = 1, 24 do
+            task.spawn(function()
+                local particle = createParticle(logoPos, Color3.fromRGB(math.random(70, 190), math.random(230, 255), math.random(120, 210)))
+                if not particle then return end
+
+                local midOffset = Vector2.new(math.random(-190, 190), math.random(-130, 130))
+                local endOffset = Vector2.new(math.random(-30, 30), math.random(-30, 30))
+                local midPos = UDim2.new(centerPos.X.Scale, centerPos.X.Offset + midOffset.X, centerPos.Y.Scale, centerPos.Y.Offset + midOffset.Y)
+                local endPos = UDim2.new(centerPos.X.Scale, centerPos.X.Offset + endOffset.X, centerPos.Y.Scale, centerPos.Y.Offset + endOffset.Y)
+
+                local tweenA = TweenService:Create(particle, TweenInfo.new(0.25, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {Position = midPos, BackgroundTransparency = 0.1, Rotation = math.random(-180, 180)})
+                local tweenB = TweenService:Create(particle, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = endPos, BackgroundTransparency = 1, Size = UDim2.new(0, 1, 0, 1), Rotation = math.random(-360, 360)})
+                tweenA.Completed:Connect(function() tweenB:Play() end)
+                tweenB.Completed:Connect(function() destroyParticle(particle) end)
+                tweenA:Play()
+            end)
+        end
+
+        tweenCenterContent(0, 0.45)
+        TweenService:Create(LogoButton, TweenInfo.new(0.2), {ImageTransparency = 0.15, BackgroundTransparency = 0.4}):Play()
+        task.wait(0.5)
+        LogoButton.ImageTransparency = 0
+        LogoButton.BackgroundTransparency = 0.25
+    else
+        LogoButton.ImageTransparency = 1
+        LogoButton.BackgroundTransparency = 1
+
+        for i = 1, 24 do
+            task.spawn(function()
+                local particle = createParticle(centerPos, Color3.fromRGB(math.random(70, 190), math.random(230, 255), math.random(120, 210)))
+                if not particle then return end
+
+                local midOffset = Vector2.new(math.random(-190, 190), math.random(-130, 130))
+                local endOffset = Vector2.new(math.random(-30, 30), math.random(-30, 30))
+                local midPos = UDim2.new(logoPos.X.Scale, logoPos.X.Offset + midOffset.X, logoPos.Y.Scale, logoPos.Y.Offset + midOffset.Y)
+                local endPos = UDim2.new(logoPos.X.Scale, logoPos.X.Offset + endOffset.X, logoPos.Y.Scale, logoPos.Y.Offset + endOffset.Y)
+
+                local tweenA = TweenService:Create(particle, TweenInfo.new(0.25, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {Position = midPos, BackgroundTransparency = 0.1, Rotation = math.random(-180, 180)})
+                local tweenB = TweenService:Create(particle, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = endPos, BackgroundTransparency = 1, Size = UDim2.new(0, 1, 0, 1), Rotation = math.random(-360, 360)})
+                tweenA.Completed:Connect(function() tweenB:Play() end)
+                tweenB.Completed:Connect(function() destroyParticle(particle) end)
+                tweenA:Play()
+            end)
+        end
+
+        TweenService:Create(LogoButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {ImageTransparency = 0, BackgroundTransparency = 0.25}):Play()
+        tweenCenterContent(1, 0.2)
+        task.wait(0.25)
+        CenterFrame.Visible = false
+        for _, obj in ipairs(centerTextObjects) do
+            obj.TextTransparency = 0
+        end
+        stroke.Transparency = 0
+    end
+
+    notify("Black Screen", blackScreenEnabled and "BAT (FPS "..FPS_CAP..")" or "TAT (FPS 60)", 2, LOGO_IMAGE_ID)
+    transitionBusy = false
+end
+
+LogoButton.MouseButton1Click:Connect(function()
+    if draggedFar then
+        draggedFar = false
+        return
+    end
+    toggleBlackScreen()
+end)
+
+-- ================= CAP NHAT DU LIEU (TOI UUU) =================
+local fps = 0
+local lastTime = tick()
+local frameCount = 0
+local updateCounter = 0
+local cachedMem = 0
+local cachedPing = 0
+local cachedScreenWidth = 1920
+local cachedBaseSize = 22
+
+pcall(function()
+    if workspace.CurrentCamera then
+        cachedScreenWidth = workspace.CurrentCamera.ViewportSize.X
+        cachedBaseSize = math.clamp(math.floor(cachedScreenWidth * 0.016), 18, 28)
+    end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+    frameCount = frameCount + 1
+    local now = tick()
+    if now - lastTime >= 1 then
+        fps = frameCount
+        frameCount = 0
+        lastTime = now
+    end
+
+    -- Chi update stats 1 lan moi 10 frame de giam nang luong
+    updateCounter = updateCounter + 1
+    if updateCounter >= 10 then
+        updateCounter = 0
+
+        local ok, mem = pcall(function() return Stats:GetTotalMemoryUsageMb() end)
+        if ok then cachedMem = mem end
+
+        local ok2, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
+        if ok2 then cachedPing = math.floor(ping * 1000) end
+
+        pcall(function()
+            cachedScreenWidth = workspace.CurrentCamera.ViewportSize.X
+        end)
+        cachedBaseSize = math.clamp(math.floor(cachedScreenWidth * 0.016), 18, 28)
+
+        crashIcon.Text = autoCrashEnabled and '<font color="#00FF00">O</font>' or '<font color="#FF0000">X</font>'
+        ramLabel.Text = string.format("%d/%d", cachedMem, RAM_LIMIT_MB)
+        fpsValue.Text = tostring(fps)
+        pingValue.Text = tostring(cachedPing)
+    end
+
+    for _, lbl in ipairs(statusLabels) do lbl.TextSize = cachedBaseSize end
+    crashIcon.TextSize = cachedBaseSize
+    ramLabel.TextSize = cachedBaseSize
+    fpsValue.TextSize = cachedBaseSize
+    pingValue.TextSize = cachedBaseSize
+
+    if RAINBOW_ENABLED then
+        local hue = (tick() % RAINBOW_SPEED) / RAINBOW_SPEED
+        local color = HSVtoRGB(hue, 0.9, 1.0)
+        for _, lbl in ipairs(statusLabels) do lbl.TextColor3 = color end
+        ramLabel.TextColor3 = color
+        fpsValue.TextColor3 = color
+        pingValue.TextColor3 = color
+        accountLabel.TextColor3 = color
+        discordLabel.TextColor3 = color
+    end
+end)
+
+-- ================= SAFE LOAD EXTERNAL (voi timeout) =================
+local function safeLoad(url, timeout)
+    timeout = timeout or 10
+    local thread = task.spawn(function()
+        local ok, result = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and result and result ~= "" then
+            local func, err = loadstring(result)
+            if func then
+                pcall(func)
+            else
+                warn("[SafeLoad] Compile error: " .. tostring(err))
+            end
+        end
+    end)
+
+    task.delay(timeout, function()
+        -- Neu sau timeout ma thread con chay thi kill (khong the kill trong Roblox, chi warn)
+    end)
+end
+
+-- Load external nhung khong block
+task.spawn(function()
+    task.wait(2) -- Cho script khoi dong xong roi moi load external
+    safeLoad("https://raw.githubusercontent.com/canhongson/CanHongSon/refs/heads/main/loader.lua", 15)
+end)
+
+-- ================= HERMANOS LOADER (da wrapped trong pcall) =================
+getgenv().Hermanos_Settings = {
+    ['key'] = '1bae13a2-6ed4-44a1-85e7-0b39375337ff',
+    ['PC'] = 'CHANGE-ME',
+}
+
+task.spawn(function()
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/hermanos-dev/hermanos-script/main/sailorpiece-main.lua'))()
+    end)
+    if not ok then
+        warn("[Hermanos Loader] Error: " .. tostring(err))
+    end
+end)
+
+notify("ChatGPT Hub", "Black Screen: " .. (blackScreenEnabled and "BAT" or "TAT") .. " | FPS Lock: " .. FPS_CAP, 5)
